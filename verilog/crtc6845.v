@@ -121,7 +121,7 @@ module crtc6845(
 
     reg [13:0] start_a = 14'd0;    //R13/R14
 
-    reg [13:0] cursor_a = 14'd92;  //R14/R15
+    reg [13:0] cursor_a = 14'd0;  //R14/R15
 
     // Counters
     reg [7:0] h_count = 8'd0;

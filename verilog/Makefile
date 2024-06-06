@@ -37,6 +37,9 @@ $(ODIR)/%.bin: $(ODIR)/%.asc
 
 #	@echo icepack $< $@
 
+cga_only: $(ODIR)/cga_top.bin
+	icemulti -c -o $(ODIR)/$(PROJ).binm $^
+
 # Combined multiboot image
 $(ODIR)/%.binm: $(addprefix $(ODIR)/,$(addsuffix .bin, $(IMAGES)))
 	icemulti -c -o $@ $^

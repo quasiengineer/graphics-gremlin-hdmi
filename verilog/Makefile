@@ -32,6 +32,9 @@ $(ODIR)/%.asc: $(ODIR)/%.json $(PIN_DEF)
 
 $(ODIR)/%.bin: $(ODIR)/%.asc
 	icepack $< $@
+	@echo Used cells: `jq .utilization.ICESTORM_LC.used $(ODIR)/$(basename $(notdir $@)).report.json` / 3520
+	@echo Used RAM: `jq .utilization.ICESTORM_RAM.used $(ODIR)/$(basename $(notdir $@)).report.json` / 20
+
 #	@echo icepack $< $@
 
 # Combined multiboot image

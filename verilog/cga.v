@@ -51,6 +51,11 @@ module cga(
     parameter IO_BASE_ADDR = 20'h3d0; // MDA is 3B0, CGA is 3D0
     parameter FRAMEBUFFER_ADDR = 20'hB8000; // MDA is B0000, CGA is B8000
 
+    localparam INITIAL_CHAR = 8'h20;            // character shown by default, until we got first access to video RAM
+    localparam INITIAL_CHAR_ATTR = 8'b01101111; // attribute = NO BLINK + BROWN BACKGROUND + WHITE FOREGROUND
+    localparam POST_CODE_VRAM_POSITION_LRES = 12'd38; // position (0, 38) for 40-column text mode
+    localparam POST_CODE_VRAM_POSITION_HRES = 12'd78; // position (0, 78) for 80-column text mode
+
     parameter OVERSCAN = 0;
 
     reg local_ovs = OVERSCAN;
@@ -116,6 +121,16 @@ module cga(
     reg[1:0] wait_state = 2'd0;
     reg bus_rdy_latch;
 
+    wire[7:0] char_to_display;
+    wire show_blank_char;
+    reg vram_has_been_accessed = 0;
+    wire show_post_code_high_digit;
+    wire show_post_code_low_digit;
+    wire post_code_present;
+    wire[7:0] post_code_high_digit;
+    wire[7:0] post_code_low_digit;
+    wire[13:0] post_code_vram_addr;
+
     // Synchronize ISA bus control lines to our clock
     always @ (posedge clk)
     begin
@@ -136,6 +151,14 @@ module cga(
 
     // Memory-mapped from B0000 to B7FFF
     assign bus_mem_cs = (bus_a[19:15] == FRAMEBUFFER_ADDR[19:15]);
+
+    // check if we ever had access to VRAM
+    always @ (*)
+    begin
+        if (bus_mem_cs) begin
+            vram_has_been_accessed <= 1;
+        end
+    end
 
     // Mux ISA bus data from every possible internal source.
     always @ (*)
@@ -309,6 +332,24 @@ module cga(
     // Address bit 14 is only used for Tandy modes (32K RAM)
     assign pixel_addr14 = grph_mode ? row_addr[1] : 1'b0;
 
+    post_code post_code_monitor(
+        .clk(clk),
+        .isa_addr_en(bus_aen),
+        .isa_io_write(bus_iow_synced_l),
+        .isa_addr(bus_a),
+        .isa_data(bus_d),
+        .post_code_present(post_code_present),
+        .post_code_high_digit(post_code_high_digit),
+        .post_code_low_digit(post_code_low_digit)
+    );
+
+    assign post_code_vram_addr = hres_mode ? POST_CODE_VRAM_POSITION_HRES : POST_CODE_VRAM_POSITION_LRES;
+    assign show_post_code_high_digit = (!grph_mode && vram_read_char && crtc_addr == post_code_vram_addr && post_code_present);
+    assign show_post_code_low_digit = (!grph_mode && vram_read_char && crtc_addr == (post_code_vram_addr + 1) && post_code_present);
+    assign show_blank_char = !show_post_code_high_digit && !show_post_code_low_digit && !vram_has_been_accessed;
+    assign char_to_display = show_blank_char 
+      ? (vram_read_char ? INITIAL_CHAR : INITIAL_CHAR_ATTR)
+      : (show_post_code_high_digit ? post_code_high_digit : (show_post_code_low_digit ? post_code_low_digit : ram_1_d));
 
     // Sequencer state machine
     cga_sequencer sequencer (
@@ -338,7 +379,7 @@ module cga(
         .mode_640(mode_640),
         .tandy_16_mode(tandy_16_mode),
         .thin_font(thin_font),
-        .vram_data(ram_1_d),
+        .vram_data(char_to_display),
         .vram_read_char(vram_read_char),
         .vram_read_att(vram_read_att),
         .disp_pipeline(disp_pipeline),

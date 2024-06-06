@@ -38,6 +38,10 @@ module mda(
     parameter MDA_70HZ = 1;
     parameter BLINK_MAX = 0;
 
+    localparam INITIAL_CHAR = 8'h20;             // character shown by default, until we got first access to video RAM
+    localparam INITIAL_CHAR_ATTR = 8'b00011000;  // attribute = NO BLINK + INTENSITY + NO UNDERLINE
+    localparam POST_CODE_VRAM_POSITION = 12'd78; // position (0, 78) for 80-column text mode
+
     wire crtc_cs;
     wire status_cs;
     wire control_cs;
@@ -80,6 +84,15 @@ module mda(
     reg bus_ior_synced_l;
     reg bus_iow_synced_l;
 
+    wire[7:0] char_to_display;
+    wire show_blank_char;
+    reg vram_has_been_accessed = 0;
+    wire show_post_code_high_digit;
+    wire show_post_code_low_digit;
+    wire post_code_present;
+    wire[7:0] post_code_high_digit;
+    wire[7:0] post_code_low_digit;
+
     // Synchronize ISA bus control lines to our clock
     always @ (posedge clk)
     begin
@@ -99,6 +112,14 @@ module mda(
 
     // Memory-mapped from B0000 to B7FFF
     assign bus_mem_cs = (bus_a[19:15] == 5'b10110);
+
+    // check if we ever had access to VRAM
+    always @ (*)
+    begin
+        if (bus_mem_cs) begin
+            vram_has_been_accessed <= 1;
+        end
+    end
 
     // Mux ISA bus data from every possible internal source.
     always @ (*)
@@ -203,6 +224,24 @@ module mda(
 
     defparam video_buffer.MDA_70HZ = MDA_70HZ;
 
+    post_code post_code_monitor(
+        .clk(clk),
+        .isa_addr_en(bus_aen),
+        .isa_io_write(bus_iow_synced_l),
+        .isa_addr(bus_a),
+        .isa_data(bus_d),
+        .post_code_present(post_code_present),
+        .post_code_high_digit(post_code_high_digit),
+        .post_code_low_digit(post_code_low_digit)
+    );
+
+    assign show_post_code_high_digit = (vram_read_char && crtc_addr == POST_CODE_VRAM_POSITION && post_code_present);
+    assign show_post_code_low_digit = (vram_read_char && crtc_addr == (POST_CODE_VRAM_POSITION + 1) && post_code_present);
+    assign show_blank_char = !show_post_code_high_digit && !show_post_code_low_digit && !vram_has_been_accessed;
+    assign char_to_display = show_blank_char 
+      ? (vram_read_char ? INITIAL_CHAR : INITIAL_CHAR_ATTR)
+      : (show_post_code_high_digit ? post_code_high_digit : (show_post_code_low_digit ? post_code_low_digit : ram_1_d));
+
     // Sequencer state machine
     mda_sequencer sequencer (
         .clk(clk),
@@ -223,7 +262,7 @@ module mda(
     mda_pixel pixel (
         .clk(clk),
         .clk_seq(clkdiv),
-        .vram_data(ram_1_d),
+        .vram_data(char_to_display),
         .vram_read_char(vram_read_char),
         .vram_read_att(vram_read_att),
         .disp_pipeline(disp_pipeline),
